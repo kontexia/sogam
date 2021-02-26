@@ -2,12 +2,12 @@
 # -*- encoding: utf-8 -*-
 
 
-from sogam.am_graph import AMGraph
-from sogam.am_gas import AMGas
-from sogam.am_gas_viz import plot_gas, plot_pors
+from src.am_graph import AMGraph
+from src.am_gas import AMGas
+from src.am_gas_viz import plot_gas, plot_pors
 from sklearn.datasets import make_moons, make_swiss_roll
 import json
-from sogam.am_fabric import AMFabric
+from src.am_fabric import AMFabric
 
 
 def moon_test():

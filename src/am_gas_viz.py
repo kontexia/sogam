@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 
-from sogam.am_graph import get_triple_key
+from src.am_graph import get_triple_key
 
 import plotly.graph_objects as go
 

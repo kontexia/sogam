@@ -4,7 +4,7 @@
 from typing import Tuple
 from copy import deepcopy
 
-from sogam.am_graph import AMGraph
+from src.am_graph import AMGraph
 
 
 

@@ -2,8 +2,8 @@
 # -*- encoding: utf-8 -*-
 
 
-from sogam.am_graph import AMGraph, EdgeType, Por, NodeId, NodeKey, get_node_id
-from sogam.normalise_amgraph import NormaliseAMGraph
+from src.am_graph import AMGraph, EdgeType, Por, NodeId, NodeKey, get_node_id
+from src.normalise_amgraph import NormaliseAMGraph
 from typing import Optional, Set, Tuple
 
 
