@@ -775,7 +775,7 @@ class AMGraph(object):
 
 if __name__ == '__main__':
 
-    from sogam.normalise_amgraph import NormaliseAMGraph
+    from src.normalise_amgraph import NormaliseAMGraph
 
     g1 = AMGraph(directional=True)
     g1.set_edge(triple=(('A', '1'), ('HAS_B', None, None), ('B', '2')), numeric=200)
