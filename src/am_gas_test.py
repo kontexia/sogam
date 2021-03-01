@@ -11,7 +11,7 @@ from src.am_fabric import AMFabric
 
 
 def moon_test():
-    data_set, labels = make_moons(n_samples=200,
+    data_set, labels = make_moons(n_samples=600,
                                   noise=0.05,
                                   random_state=0)
 
@@ -31,9 +31,9 @@ def moon_test():
     ng = AMGas(fabric_name='MoonTest',
                domain='Moon',
                anomaly_threshold_factor=4.0,
-               fast_alpha=0.9,
+               fast_alpha=0.7,
 
-               prune_threshold=0.01,
+               prune_threshold=0.001,
                audit=False,
                normalise=True)
 
@@ -81,8 +81,8 @@ def swiss_roll_test():
     ng = AMGas(fabric_name='SwissRollTest',
                domain='Swiss',
                anomaly_threshold_factor=4.0,
-               fast_alpha=0.9,
-               prune_threshold=0.01,
+               fast_alpha=0.95,
+               prune_threshold=0.001,
                audit=False,
                normalise=True)
 
@@ -134,7 +134,7 @@ def square_test():
     ng = AMGas(fabric_name='SquareTest',
                domain='Square',
                anomaly_threshold_factor=4.0,
-               fast_alpha=0.9,
+               fast_alpha=0.7,
 
                prune_threshold=0.01,
                audit=False,
@@ -190,16 +190,16 @@ def colours_test():
 
         training_graphs[record['client']].append((record['trade_id'], t_g, r_data))
 
-    n_cycles = 10
+    n_cycles = 5
 
     gases = {}
     for client in training_graphs:
         pors = []
         ng = AMGas(fabric_name='Colours',
                    domain=client,
-                   anomaly_threshold_factor=4.0,
-                   fast_alpha=0.5,
-                   prune_threshold=0.01,
+                   anomaly_threshold_factor=6.0,
+                   fast_alpha=0.7,
+                   prune_threshold=0.00001,
                    audit=False,
                    normalise=True)
         gases[client] = {'ng': ng}
@@ -272,14 +272,14 @@ def colours_fabric_test():
 
         training_graphs[record['client']].append((record['trade_id'], t_g, r_data))
 
-    n_cycles = 10
+    n_cycles = 1
     gases = {}
     for client in training_graphs:
         pors = []
         ng = AMFabric(fabric_name=client,
-                      anomaly_threshold_factor=3.0,
-                      fast_alpha=0.5,
-                      prune_threshold=0.01,
+                      anomaly_threshold_factor=6.0,
+                      fast_alpha=0.7,
+                      prune_threshold=0.0001,
                       audit=False,
                       normalise=True)
         gases[client] = {'ng': ng}
@@ -317,7 +317,7 @@ def colours_fabric_test():
 if __name__ == '__main__':
     colours_fabric_test()
 
-    colours_test()
-    moon_test()
-    swiss_roll_test()
-    square_test()
+    #colours_test()
+    #moon_test()
+    #swiss_roll_test()
+    #square_test()
