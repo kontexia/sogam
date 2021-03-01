@@ -408,6 +408,9 @@ class AMGraph(object):
 
             del self.nodes[node_key]
 
+            if node_key in self.embedded_graphs:
+                del self.embedded_graphs[node_key]
+
     def compare_graph(self, graph_to_compare=None, compare_edge_types: Optional[Set[EdgeType]] = None) -> Tuple[float, Por]:
 
         distance: float = 0.0
@@ -750,7 +753,7 @@ class AMGraph(object):
                         graph.set_edge(triple=(source_id, edge_id, target_id),
                                        prob=self.edges[edge_key]['_prob'],
                                        numeric=self.edges[edge_key]['_numeric'])
-                    sub_graphs.append(graph)
+                    sub_graphs.append((self.nodes[node_key]['_type'], graph))
 
         return sub_graphs
 
