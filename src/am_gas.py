@@ -19,7 +19,7 @@ class AMGas(object):
                  fabric_name: str,
                  domain: str,
                  anomaly_threshold_factor: float = 4.0,
-                 fast_alpha: float = 0.9,
+                 fast_alpha: float = 0.7,
                  prune_threshold: float = 0.01,
                  audit: bool = False,
                  normalise: bool = True):
@@ -28,7 +28,7 @@ class AMGas(object):
         self.domain: str = domain
         self.anomaly_threshold_factor: float = anomaly_threshold_factor
         self.fast_alpha = fast_alpha
-        self.slow_alpha = 0.1
+        self.slow_alpha = 1 - fast_alpha
         self.anomaly_threshold: float = 0.0
         self.anomalies: dict = {}
         self.prune_threshold: float = prune_threshold
@@ -153,12 +153,16 @@ class AMGas(object):
                                               domain=self.domain,
                                               update_id=update_id,
                                               threshold=distance_threshold,
-                                              ema_error=0.0,
+                                              ema_error=None,
                                               generalised_graph=graph,
                                               n_bmu=1,
                                               last_bmu=update_id,
                                               n_runner_up=0,
                                               last_runner_up=None,
+                                              activation=1.0,
+
+                                              # set the learning rate for the next update
+                                              #
                                               learn_rate=self.fast_alpha
                                               )
         self.last_bmu_key = neuron_key
@@ -183,7 +187,8 @@ class AMGas(object):
                     'ema_error': self.ema_error,
                     'ema_variance': self.ema_variance,
                     'anomaly_threshold': self.anomaly_threshold,
-                    'motif_threshold': self.motif_threshold
+                    'motif_threshold': self.motif_threshold,
+                    'deleted_neuron_key': None
                     }
 
         self.update_id += 1
@@ -205,6 +210,7 @@ class AMGas(object):
             #
             new_neuron_key = self.add_neuron(graph=t_graph, distance_threshold=0.0)
             por['new_neuron_key'] = new_neuron_key
+
         else:
 
             if renormalise:
@@ -240,8 +246,10 @@ class AMGas(object):
             if bmu_distance > self.neural_gas.nodes[bmu_key]['threshold']:
 
                 # add new neuron
+                # distance threshold is mid point between new neuron and bmu
                 #
-                new_neuron_key = self.add_neuron(graph=t_graph, distance_threshold=bmu_distance)
+                distance_threshold = bmu_distance / 2.0
+                new_neuron_key = self.add_neuron(graph=t_graph, distance_threshold=distance_threshold)
                 new_neuron_id = get_node_id(node_key=new_neuron_key)
 
                 por['new_neuron_key'] = new_neuron_key
@@ -250,21 +258,49 @@ class AMGas(object):
                 #
                 self.neural_gas.set_edge(triple=(bmu_id, ('NN', None, None), new_neuron_id), numeric=bmu_distance)
 
+                # increase the distance threshold of the existing (bmu neuron) if required
+                #
+                if distance_threshold > self.neural_gas.nodes[bmu_key]['threshold']:
+                    self.neural_gas.nodes[bmu_key]['threshold'] = distance_threshold
+
+                # get first neuron that has aged enough to be deleted
+                #
+                neuron_to_deactivate = []
+                for neuron_key in self.neural_gas.nodes:
+                    if neuron_key not in [new_neuron_key, bmu_key]:
+
+                        # decay the activation with rate the depends on its current learn_rate and the slow_alpha
+                        #
+                        self.neural_gas.nodes[neuron_key]['activation'] -= (self.neural_gas.nodes[neuron_key]['activation'] * self.slow_alpha * self.neural_gas.nodes[neuron_key]['learn_rate'])
+                        if self.neural_gas.nodes[neuron_key]['activation'] < self.prune_threshold:
+                            neuron_to_deactivate.append(neuron_key)
+
+                            # only need first 1 so beak out of loop
+                            #
+                            break
+
+                if len(neuron_to_deactivate) > 0:
+                    self.neural_gas.remove_node(neuron_to_deactivate[0])
+                    por['deleted_neuron_key'] = neuron_to_deactivate[0]
+
             else:
 
-                # update the bmu neuron attributes
+                # the data is close enough to the bmu to be mapped
+                # so update the bmu neuron attributes
                 #
                 self.neural_gas.nodes[bmu_key]['n_bmu'] += 1
                 self.neural_gas.nodes[bmu_key]['last_bmu'] = self.update_id
 
-                # a neurons' error learns slowly
+                # a neuron's error for mapped data is the exponential moving average of the distance.
                 #
-                self.neural_gas.nodes[bmu_key]['ema_error'] += ((bmu_distance - self.neural_gas.nodes[bmu_key]['ema_error']) * self.slow_alpha)
+                if self.neural_gas.nodes[bmu_key]['ema_error'] is None:
+                    self.neural_gas.nodes[bmu_key]['ema_error'] = bmu_distance
+                else:
+                    self.neural_gas.nodes[bmu_key]['ema_error'] += ((bmu_distance - self.neural_gas.nodes[bmu_key]['ema_error']) * self.slow_alpha)
 
-                # the threshold is adjusted using the neuron's learning_rate
+                # reduce the distance threshold towards the error average
                 #
-                self.neural_gas.nodes[bmu_key]['threshold'] = max((bmu_distance + self.neural_gas.nodes[bmu_key]['threshold']) * 0.5,
-                                                                  self.neural_gas.nodes[bmu_key]['ema_error'])
+                self.neural_gas.nodes[bmu_key]['threshold'] += (self.neural_gas.nodes[bmu_key]['ema_error'] - self.neural_gas.nodes[bmu_key]['threshold']) * self.slow_alpha
 
                 # learn the generalised graph
                 #
@@ -274,7 +310,14 @@ class AMGas(object):
                                                                                 prune_threshold=self.prune_threshold,
                                                                                 audit=self.audit)
 
-                updated_neurons = {bmu_key}
+                # reset the bmu activation to full strength
+                #
+                self.neural_gas.nodes[bmu_key]['activation'] = 1.0
+
+                updated_neurons = set()
+
+                updated_neurons.add(bmu_key)
+
                 if len(distances) > 1:
 
                     nn_idx = 1
@@ -294,7 +337,13 @@ class AMGas(object):
                             self.neural_gas.nodes[nn_key]['n_runner_up'] += 1
                             self.neural_gas.nodes[nn_key]['last_runner_up'] = self.update_id
 
-                            nn_learn_rate = self.neural_gas.nodes[bmu_key]['learn_rate'] * 0.01
+                            # reset the neighbour activation to full strength
+                            #
+                            self.neural_gas.nodes[nn_key]['activation'] = 1.0
+
+                            # the learning rate for a neighbour needs to be much less that the bmu - hence the product of learning rates and 0.1 factor
+                            #
+                            nn_learn_rate = self.neural_gas.nodes[bmu_key]['learn_rate'] * self.neural_gas.nodes[nn_key]['learn_rate'] * 0.1
 
                             # learn the generalised graph
                             #
@@ -326,9 +375,14 @@ class AMGas(object):
                                 self.neural_gas.edges[triple_key]['_numeric'] = distance[0]
                                 triples_to_process.add(triple_key)
 
+                # decay the learning rate so that this neuron learns more slowly the more it gets mapped too
+                #
+                self.neural_gas.nodes[bmu_key]['learn_rate'] -= self.neural_gas.nodes[bmu_key]['learn_rate'] * self.slow_alpha
+
             anomaly, motif = self.update_gas_error(bmu_key=bmu_key, bmu_distance=bmu_distance, ref_id=ref_id)
             por['anomaly'] = anomaly
             por['motif'] = motif
+
         por['nos_neurons'] = len(self.neural_gas.nodes)
 
         return por
@@ -402,8 +456,7 @@ if __name__ == '__main__':
     ng = AMGas(fabric_name='test',
                domain='trades',
                anomaly_threshold_factor=4.0,
-               error_learn_rate=0.1,
-               neuron_threshold_learn_rate=0.7,
+               fast_alpha=0.7,
                prune_threshold=0.01,
                audit=False,
                normalise=True
