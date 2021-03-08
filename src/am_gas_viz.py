@@ -109,9 +109,9 @@ def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
         raw_size.append(5)
         raw_colour.append(1)
 
-    raw_scatter = go.Scatter3d(x=raw_x, y=raw_y, z=raw_z, mode='markers',  marker=dict(size=3, color=raw_colour, opacity=1.0, symbol='square'))
-    neuron_scatter = go.Scatter3d(x=node_x, y=node_y, z=node_z, hovertext=node_label, mode='markers+text', marker=dict(size=node_size, color=node_colour, opacity=0.7))
-    edge_scatter = go.Scatter3d(x=edge_x, y=edge_y, z=edge_z, mode='lines', line=dict(width=1, color='grey'))
+    raw_scatter = go.Scatter3d(x=raw_x, y=raw_y, z=raw_z, mode='markers',  name='raw data', marker=dict(size=3, color=raw_colour, opacity=1.0, symbol='square'))
+    neuron_scatter = go.Scatter3d(x=node_x, y=node_y, z=node_z, name='neuron', hovertext=node_label, mode='markers+text', marker=dict(size=node_size, color=node_colour, opacity=0.7))
+    edge_scatter = go.Scatter3d(x=edge_x, y=edge_y, z=edge_z, name='nn edge', mode='lines', line=dict(width=1, color='grey'))
 
     fig = go.Figure(data=[raw_scatter, edge_scatter, neuron_scatter])
 
@@ -150,16 +150,16 @@ def plot_pors(pors):
         else:
             motifs.append(None)
 
-    error_scatter = go.Scatter(x=x_values, y=error, mode='lines', line=dict(width=2, color='black'))
-    nos_neurons_scatter = go.Scatter(x=x_values, y=nos_neurons, mode='lines', line=dict(width=2, color='orange'))
+    error_scatter = go.Scatter(x=x_values, y=error, mode='lines', name='error', line=dict(width=2, color='black'))
+    nos_neurons_scatter = go.Scatter(x=x_values, y=nos_neurons, mode='lines', name='nos neurons', line=dict(width=2, color='orange'))
 
-    anomaly_threshold_scatter = go.Scatter(x=x_values, y=anomaly_threshold, mode='lines', line=dict(width=2, color='red'))
-    motif_threshold_scatter = go.Scatter(x=x_values, y=motif_threshold, mode='lines', line=dict(width=2, color='green'))
-    ema_error_scatter = go.Scatter(x=x_values, y=ema_error, mode='lines', line=dict(width=2, color='blue'))
-    ema_stdev_scatter = go.Scatter(x=x_values, y=ema_stdev, mode='lines', line=dict(width=2, color='purple'))
+    anomaly_threshold_scatter = go.Scatter(x=x_values, y=anomaly_threshold, mode='lines', name='anomaly threshold', line=dict(width=2, color='red'))
+    motif_threshold_scatter = go.Scatter(x=x_values, y=motif_threshold, mode='lines', name='motif threshold', line=dict(width=2, color='green'))
+    ema_error_scatter = go.Scatter(x=x_values, y=ema_error, mode='lines', name='ema error', line=dict(width=2, color='blue'))
+    ema_stdev_scatter = go.Scatter(x=x_values, y=ema_stdev, mode='lines', name='stdev error', line=dict(width=2, color='purple'))
 
-    anomalies_scatter = go.Scatter(x=x_values, y=anomalies, mode='markers', marker=dict(size=10, color='red', opacity=1.0, symbol='square'))
-    motifs_scatter = go.Scatter(x=x_values, y=motifs, mode='markers', marker=dict(size=10, color='green', opacity=1.0, symbol='square'))
+    anomalies_scatter = go.Scatter(x=x_values, y=anomalies, mode='markers', name='anomaly', marker=dict(size=10, color='red', opacity=1.0, symbol='square'))
+    motifs_scatter = go.Scatter(x=x_values, y=motifs, mode='markers', name='motif', marker=dict(size=10, color='green', opacity=1.0, symbol='square'))
 
     fig = go.Figure(data=[nos_neurons_scatter, error_scatter, anomaly_threshold_scatter, motif_threshold_scatter, ema_error_scatter,ema_stdev_scatter, anomalies_scatter, motifs_scatter])
 
