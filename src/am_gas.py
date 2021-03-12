@@ -5,6 +5,7 @@
 from src.am_graph import AMGraph, EdgeType, Por, NodeId, NodeKey, get_node_id
 from src.normalise_amgraph import NormaliseAMGraph
 from typing import Optional, Set, Tuple
+import random
 
 
 NeuronId = NodeId
@@ -22,7 +23,8 @@ class AMGas(object):
                  fast_alpha: float = 0.7,
                  prune_threshold: float = 0.01,
                  audit: bool = False,
-                 normalise: bool = True):
+                 normalise: bool = True,
+                 delete_old_neurons: bool = False):
 
         self.fabric_name: str = fabric_name
         self.domain: str = domain
@@ -44,6 +46,7 @@ class AMGas(object):
         self.audit: bool = audit
         self.updated: bool = True
         self.normaliser: Optional[NormaliseAMGraph] = None
+        self.delete_old_neurons = delete_old_neurons
 
         if normalise:
             self.normaliser = NormaliseAMGraph()
@@ -66,7 +69,8 @@ class AMGas(object):
                  'motifs': self.motifs,
                  'search_edge_types': self.search_edge_types,
                  'audit': self.audit,
-                 'normaliser': None
+                 'normaliser': None,
+                 'delete_old_neurons': self.delete_old_neurons
                  }
         if self.normaliser is not None:
             d_gas['normaliser'] = self.normaliser.to_dict()
@@ -96,6 +100,7 @@ class AMGas(object):
         self.motifs = d_gas['motifs']
         self.search_edge_types = d_gas['search_edge_types']
         self.audit = d_gas['audit']
+        self.delete_old_neurons = d_gas['delete_old_neurons']
         if d_gas['normaliser'] is not None:
             self.normaliser = NormaliseAMGraph(normalise_amgraph=d_gas['normaliser'])
             if normalise:
@@ -249,6 +254,7 @@ class AMGas(object):
                 # distance threshold is mid point between new neuron and bmu
                 #
                 distance_threshold = bmu_distance / 2.0
+
                 new_neuron_key = self.add_neuron(graph=t_graph, distance_threshold=distance_threshold)
                 new_neuron_id = get_node_id(node_key=new_neuron_key)
 
@@ -263,25 +269,26 @@ class AMGas(object):
                 if distance_threshold > self.neural_gas.nodes[bmu_key]['threshold']:
                     self.neural_gas.nodes[bmu_key]['threshold'] = distance_threshold
 
-                # get first neuron that has aged enough to be deleted
-                #
-                neuron_to_deactivate = []
-                for neuron_key in self.neural_gas.nodes:
-                    if neuron_key not in [new_neuron_key, bmu_key]:
+                if self.delete_old_neurons:
+                    # get first neuron that has aged enough to be deleted
+                    #
+                    neuron_to_deactivate = []
+                    for neuron_key in self.neural_gas.nodes:
+                        if neuron_key not in [new_neuron_key, bmu_key]:
 
-                        # decay the activation with rate the depends on its current learn_rate and the slow_alpha
-                        #
-                        self.neural_gas.nodes[neuron_key]['activation'] -= (self.neural_gas.nodes[neuron_key]['activation'] * self.slow_alpha * self.neural_gas.nodes[neuron_key]['learn_rate'])
-                        if self.neural_gas.nodes[neuron_key]['activation'] < self.prune_threshold:
-                            neuron_to_deactivate.append(neuron_key)
-
-                            # only need first 1 so beak out of loop
+                            # decay the activation with rate the depends on its current learn_rate and the slow_alpha
                             #
-                            break
+                            self.neural_gas.nodes[neuron_key]['activation'] -= (self.neural_gas.nodes[neuron_key]['activation'] * self.slow_alpha * self.neural_gas.nodes[neuron_key]['learn_rate'])
+                            if self.neural_gas.nodes[neuron_key]['activation'] < self.prune_threshold:
+                                neuron_to_deactivate.append(neuron_key)
 
-                if len(neuron_to_deactivate) > 0:
-                    self.neural_gas.remove_node(neuron_to_deactivate[0])
-                    por['deleted_neuron_key'] = neuron_to_deactivate[0]
+                                # only need first 1 so beak out of loop
+                                #
+                                break
+
+                    if len(neuron_to_deactivate) > 0:
+                        self.neural_gas.remove_node(neuron_to_deactivate[0])
+                        por['deleted_neuron_key'] = neuron_to_deactivate[0]
 
             else:
 
