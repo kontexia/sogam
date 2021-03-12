@@ -19,45 +19,6 @@ class AMString(object):
                 else:
                     self.string.append({ch: 1.0, ch.lower(): 0.5})
 
-    def distance_v1(self, string, normalise: Optional[int] = None) -> float:
-        distance = 0.0
-
-        if isinstance(string, AMString):
-            str_to_compare = string.string
-        else:
-            str_to_compare =[]
-            for ch in string:
-                # add in opposite case
-                #
-                if ch.islower():
-                    str_to_compare.append({ch: 1.0, ch.upper(): 0.5})
-                else:
-                    str_to_compare.append({ch: 1.0, ch.lower(): 0.5})
-
-        string_len = max(len(self.string), len(str_to_compare))
-        if normalise is None:
-            normalise = string_len
-
-        for pos in range(string_len):
-            if pos < len(self.string) and pos < len(str_to_compare):
-                chars_to_test = set(self.string[pos].keys()) | set(str_to_compare[pos].keys())
-                for ch in chars_to_test:
-                    if ch in self.string[pos] and ch in str_to_compare[pos]:
-                        distance += pow(self.string[pos][ch] - str_to_compare[pos][ch], 2)
-                    elif ch in self.string[pos]:
-                        distance += pow(self.string[pos][ch], 2)
-                    else:
-                        distance += pow(str_to_compare[pos][ch], 2)
-            elif pos < len(self.string):
-                for ch in self.string[pos]:
-                    distance += pow(self.string[pos][ch], 2)
-            else:
-                for ch in str_to_compare[pos]:
-                    distance += pow(str_to_compare[pos][ch], 2)
-
-        distance = pow(distance, 0.5) / pow(normalise * 4, 0.5)
-        return distance
-
     def distance(self, string, normalise: Optional[int] = None) -> float:
         distance = 0.0
 
