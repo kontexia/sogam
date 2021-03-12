@@ -190,7 +190,7 @@ def colours_test():
 
         training_graphs[record['client']].append((record['trade_id'], t_g, r_data))
 
-    n_cycles = 5
+    n_cycles = 1
 
     gases = {}
     for client in training_graphs:
@@ -314,8 +314,91 @@ def colours_fabric_test():
         print(f'finished {client}')
 
 
+def number_experiments():
+    from random import sample
+    #numbers = [n for n in sample(range(1000), k=60)]
+
+    numbers = [n for n in range(60)]
+
+    training_graphs = []
+
+    for n in numbers:
+        tg = AMGraph()
+        tg.set_edge(triple=(('quantity', '*'), ('has_int', None, None), ('int', 'int')), numeric=n)
+
+        training_graphs.append(tg)
+
+    pors = []
+    ng = AMGas(fabric_name='Numbers',
+               domain='ints',
+               anomaly_threshold_factor=6.0,
+               fast_alpha=0.7,
+               prune_threshold=0.00001,
+               audit=False,
+               normalise=True,
+               delete_old_neurons=True)
+
+    cycles = 1
+    for cycle in range(cycles):
+        for t_idx in range(len(training_graphs)):
+            por = ng.train(training_graph=training_graphs[t_idx],
+                           ref_id=str(t_idx),
+                           search_edge_types={'has_int'},
+                           learn_edge_types={'has_int'})
+            pors.append(por)
+
+    print('finished')
+
+
+
+def category_experiments():
+
+    years = [n for n in range(1960, 2020)]
+
+    training_graphs = []
+
+    for y_idx in range(len(years)):
+        tg = AMGraph()
+        if y_idx > 0:
+            tg.set_edge(triple=(('year', str(years[y_idx])), ('prev_year', None, None), ('year', str(years[y_idx - 1]))))
+
+        tg.set_edge(triple=(('year', str(years[y_idx])), ('exists', None, None), ('year', str(years[y_idx]))))
+
+        if y_idx < len(years) - 1:
+            tg.set_edge(triple=(('year', str(years[y_idx])), ('next_year', None, None), ('year', str(years[y_idx + 1]))))
+
+        training_graphs.append(tg)
+
+    pors = []
+    ng = AMGas(fabric_name='years',
+               domain='years',
+               anomaly_threshold_factor=6.0,
+               fast_alpha=0.7,
+               prune_threshold=0.00001,
+               audit=False,
+               normalise=True,
+               delete_old_neurons=True)
+
+    cycles = 1
+    for cycle in range(cycles):
+        for t_idx in range(len(training_graphs)):
+            por = ng.train(training_graph=training_graphs[t_idx],
+                           ref_id=str(t_idx),
+                           search_edge_types={'prev_year', 'next_year', 'exists'},
+                           learn_edge_types={'prev_year', 'next_year', 'exists'})
+            pors.append(por)
+
+    print('finished')
+
+
+
 if __name__ == '__main__':
-    colours_fabric_test()
+
+    category_experiments()
+
+    #number_experiments()
+
+    #colours_fabric_test()
 
     #colours_test()
     #moon_test()
