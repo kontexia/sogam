@@ -2,10 +2,8 @@
 # -*- encoding: utf-8 -*-
 
 
-from src.am_graph import AMGraph, EdgeType, Por, NodeId, NodeKey, get_node_id
-from src.normalise_amgraph import NormaliseAMGraph
+from src.am_hgraph import AMHGraph, NodeType, Por, NodeId, NodeKey, GraphNormaliser
 from typing import Optional, Set, Tuple
-import random
 
 
 NeuronId = NodeId
@@ -22,8 +20,8 @@ class AMGas(object):
                  anomaly_threshold_factor: float = 4.0,
                  fast_alpha: float = 0.7,
                  prune_threshold: float = 0.01,
-                 audit: bool = False,
-                 normalise: bool = True,
+                 prune_nodes: bool = False,
+                 normaliser: Optional[GraphNormaliser] = None,
                  delete_old_neurons: bool = False):
 
         self.fabric_name: str = fabric_name
@@ -34,7 +32,12 @@ class AMGas(object):
         self.anomaly_threshold: float = 0.0
         self.anomalies: dict = {}
         self.prune_threshold: float = prune_threshold
-        self.neural_gas: AMGraph = AMGraph(directional=False)
+        self.neural_gas: AMHGraph = AMHGraph(directional=False)
+
+        # neural gas by default should be normalised
+        #
+        self.neural_gas.normalised = True
+
         self.update_id: int = 0
         self.next_neuron_id: int = 0
         self.last_bmu_key: Optional[NeuronKey] = None
@@ -42,14 +45,15 @@ class AMGas(object):
         self.ema_variance: float = 0.0
         self.motif_threshold: float = 0.0
         self.motifs: dict = {}
-        self.search_edge_types: set = set()
-        self.audit: bool = audit
+        self.search_node_types: set = set()
+        self.prune_nodes: bool = prune_nodes
         self.updated: bool = True
-        self.normaliser: Optional[NormaliseAMGraph] = None
         self.delete_old_neurons = delete_old_neurons
 
-        if normalise:
-            self.normaliser = NormaliseAMGraph()
+        if normaliser is None:
+            self.normaliser = GraphNormaliser()
+        else:
+            self.normaliser = normaliser
 
     def to_dict(self, denormalise: bool = False) -> dict:
         d_gas = {'fabric_name': self.fabric_name,
@@ -67,8 +71,8 @@ class AMGas(object):
                  'anomalies': self.anomalies,
                  'motif_threshold': self.motif_threshold,
                  'motifs': self.motifs,
-                 'search_edge_types': self.search_edge_types,
-                 'audit': self.audit,
+                 'search_node_types': self.search_node_types,
+                 'prune_nodes': self.prune_nodes,
                  'normaliser': None,
                  'delete_old_neurons': self.delete_old_neurons
                  }
@@ -98,18 +102,18 @@ class AMGas(object):
         self.anomalies = d_gas['anomalies']
         self.motif_threshold = d_gas['motif_threshold']
         self.motifs = d_gas['motifs']
-        self.search_edge_types = d_gas['search_edge_types']
-        self.audit = d_gas['audit']
+        self.search_node_types = d_gas['search_node_types']
+        self.prune_nodes = d_gas['prune_nodes']
         self.delete_old_neurons = d_gas['delete_old_neurons']
         if d_gas['normaliser'] is not None:
-            self.normaliser = NormaliseAMGraph(normalise_amgraph=d_gas['normaliser'])
+            self.normaliser = GraphNormaliser(normaliser=d_gas['normaliser'])
             if normalise:
-                self.neural_gas = self.normaliser.normalise(graph=AMGraph(directional=False, graph=d_gas['neural_gas']))
+                self.neural_gas = self.normaliser.normalise(graph=AMHGraph(directional=False, graph=d_gas['neural_gas']))
             else:
-                self.neural_gas = AMGraph(directional=False, graph=d_gas['neural_gas'])
+                self.neural_gas = AMHGraph(directional=False, graph=d_gas['neural_gas'])
         else:
             self.normaliser = None
-            self.neural_gas = AMGraph(directional=False, graph=d_gas['neural_gas'])
+            self.neural_gas = AMHGraph(directional=False, graph=d_gas['neural_gas'])
 
     def update_gas_error(self, bmu_key: NeuronKey, bmu_distance: float, ref_id: str) -> Tuple[bool, bool]:
 
@@ -145,21 +149,33 @@ class AMGas(object):
 
         return anomaly, motif
 
+    # TODO
     def calc_communities(self):
         self.neural_gas.calc_communities(community_edge_type='NN', weight_field='_numeric', inverse=True)
 
-    def add_neuron(self, graph: AMGraph, distance_threshold: float = 0.0) -> NeuronKey:
+    def add_neuron(self, graph: AMHGraph, distance_threshold: float = 0.0) -> NeuronKey:
 
         neuron_id = f'{self.next_neuron_id}'
         self.next_neuron_id += 1
 
         update_id = str(self.update_id)
-        neuron_key = self.neural_gas.set_node(node=('NEURON', neuron_id),
+
+        # make sure the graph to generalise has the prune threshold set
+        #
+        graph.prune_threshold = self.prune_threshold
+
+        # a neuron is just a node in the neural gas graph
+        #
+        neuron_key = self.neural_gas.set_node(node_type='NEURON',
+                                              node_uid=neuron_id,
+
+                                              # NOTE: a neuron generalises a subgraph
+                                              #
+                                              value=graph,
                                               domain=self.domain,
                                               update_id=update_id,
                                               threshold=distance_threshold,
                                               ema_error=None,
-                                              generalised_graph=graph,
                                               n_bmu=1,
                                               last_bmu=update_id,
                                               n_runner_up=0,
@@ -174,10 +190,10 @@ class AMGas(object):
         return neuron_key
 
     def train(self,
-              training_graph: AMGraph,
+              training_graph: AMHGraph,
               ref_id: str,
-              search_edge_types: Set[EdgeType],
-              learn_edge_types: Set[EdgeType]) -> Por:
+              search_node_types: Set[NodeType],
+              learn_node_types: Set[NodeType]) -> Por:
 
         por: Por = {'fabric': self.fabric_name,
                     'domain': self.domain,
@@ -199,12 +215,12 @@ class AMGas(object):
         self.update_id += 1
         self.updated = True
 
-        self.search_edge_types.update(search_edge_types)
+        self.search_node_types.update(search_node_types)
 
         if self.normaliser is not None:
             t_graph, renormalise = self.normaliser.normalise(graph=training_graph)
         else:
-            t_graph = AMGraph(graph=training_graph)
+            t_graph = AMHGraph(graph=training_graph)
             renormalise = False
 
         # if there are no neurons then add first one
@@ -219,28 +235,28 @@ class AMGas(object):
         else:
 
             if renormalise:
+
                 # renormalise all existing neurons - use comprehension to make it quicker
                 #
-                _ = [self.normaliser.renormalise(graph=self.neural_gas.nodes[neuron_key]['generalised_graph'], create_new=False)
+                _ = [self.normaliser.renormalise(graph=self.neural_gas.nodes[neuron_key]['_value'], create_new=False)
                      for neuron_key in self.neural_gas.nodes]
 
             # calc the distance of the training graph to the existing neurons
             #
             distances = [(neuron_key,
-                          self.neural_gas.nodes[neuron_key]['generalised_graph'].compare_graph(graph_to_compare=t_graph,
-                                                                                               compare_edge_types=self.search_edge_types),
+                          self.neural_gas.nodes[neuron_key]['_value'].compare_graph(graph_to_compare=t_graph,
+                                                                                    compare_node_types=self.search_node_types),
                           self.neural_gas.nodes[neuron_key]['n_bmu'])
                          for neuron_key in self.neural_gas.nodes]
 
-            # sort in ascending order of distance and descending order of number of times bmu
+            # sort in ascending order of actual distance and descending order of number of times bmu
             #
-            distances.sort(key=lambda x: (x[1][0], -x[2]))
+            distances.sort(key=lambda x: (x[1]['graph']['actual'], -x[2]))
 
             # the bmu is the closest and thus the top of the list
             #
             bmu_key = distances[0][0]
-            bmu_id = get_node_id(node_key=bmu_key)
-            bmu_distance = distances[0][1][0]
+            bmu_distance = distances[0][1]['graph']['actual']
 
             por['bmu_key'] = bmu_key
             por['bmu_distance'] = bmu_distance
@@ -256,13 +272,12 @@ class AMGas(object):
                 distance_threshold = bmu_distance / 2.0
 
                 new_neuron_key = self.add_neuron(graph=t_graph, distance_threshold=distance_threshold)
-                new_neuron_id = get_node_id(node_key=new_neuron_key)
 
                 por['new_neuron_key'] = new_neuron_key
 
-                # connect the new neuron to the bmu
+                # connect the new neuron to the bmu neuron and remember the distance
                 #
-                self.neural_gas.set_edge(triple=(bmu_id, ('NN', None, None), new_neuron_id), numeric=bmu_distance)
+                self.neural_gas.set_edge(source_key=bmu_key, edge_type='NN', target_key=new_neuron_key, distance=bmu_distance)
 
                 # increase the distance threshold of the existing (bmu neuron) if required
                 #
@@ -311,11 +326,9 @@ class AMGas(object):
 
                 # learn the generalised graph
                 #
-                self.neural_gas.nodes[bmu_key]['generalised_graph'].learn_graph(graph_to_learn=t_graph,
-                                                                                learn_rate=self.neural_gas.nodes[bmu_key]['learn_rate'],
-                                                                                learn_edge_types=learn_edge_types,
-                                                                                prune_threshold=self.prune_threshold,
-                                                                                audit=self.audit)
+                self.neural_gas.nodes[bmu_key]['_value'].learn(graph_to_learn=t_graph,
+                                                               learn_rate=self.neural_gas.nodes[bmu_key]['learn_rate'],
+                                                               learn_node_types=learn_node_types)
 
                 # reset the bmu activation to full strength
                 #
@@ -332,7 +345,7 @@ class AMGas(object):
                     while not finished:
 
                         nn_key = distances[nn_idx][0]
-                        nn_distance = distances[nn_idx][1][0]
+                        nn_distance = distances[nn_idx][1]['graph']['actual']
 
                         # if the neuron is close enough to the incoming data
                         #
@@ -354,11 +367,9 @@ class AMGas(object):
 
                             # learn the generalised graph
                             #
-                            self.neural_gas.nodes[nn_key]['generalised_graph'].learn_graph(graph_to_learn=t_graph,
-                                                                                           learn_rate=nn_learn_rate,
-                                                                                           learn_edge_types=learn_edge_types,
-                                                                                           prune_threshold=self.prune_threshold,
-                                                                                           audit=self.audit)
+                            self.neural_gas.nodes[nn_key]['_value'].learn(graph_to_learn=t_graph,
+                                                                          learn_rate=nn_learn_rate,
+                                                                          learn_node_types=learn_node_types)
                             nn_idx += 1
                             if nn_idx >= len(distances):
                                 finished = True
@@ -367,20 +378,23 @@ class AMGas(object):
 
                     # recalculate the distances between updated neurons
                     #
-                    triples_to_process = set()
+                    edges_to_process = set()
                     for neuron_key in updated_neurons:
-                        for triple_key in self.neural_gas.nodes[neuron_key]['_edges']:
-                            if triple_key not in triples_to_process:
+                        for edge_key in self.neural_gas.nodes[neuron_key]['_edges']:
+                            if edge_key not in edges_to_process:
 
-                                if self.neural_gas.edges[triple_key]['_source'] != neuron_key:
-                                    nn_key = self.neural_gas.edges[triple_key]['_source']
+                                if self.neural_gas.edges[edge_key]['_source'] != neuron_key:
+                                    nn_key = self.neural_gas.edges[edge_key]['_source']
                                 else:
-                                    nn_key = self.neural_gas.edges[triple_key]['_target']
+                                    nn_key = self.neural_gas.edges[edge_key]['_target']
 
-                                distance = self.neural_gas.nodes[neuron_key]['generalised_graph'].compare_graph(graph_to_compare=self.neural_gas.nodes[nn_key]['generalised_graph'],
-                                                                                                                compare_edge_types=self.search_edge_types)
-                                self.neural_gas.edges[triple_key]['_numeric'] = distance[0]
-                                triples_to_process.add(triple_key)
+                                distance = self.neural_gas.nodes[neuron_key]['_value'].compare_graph(graph_to_compare=self.neural_gas.nodes[nn_key]['_value'],
+                                                                                                     compare_node_types=self.search_node_types)
+
+                                # set the distance in the edge
+                                #
+                                self.neural_gas.edges[edge_key]['distance'] = distance['graph']['actual']
+                                edges_to_process.add(edge_key)
 
                 # decay the learning rate so that this neuron learns more slowly the more it gets mapped too
                 #
@@ -398,38 +412,40 @@ class AMGas(object):
 
         if self.normaliser is not None:
 
-            q_graph, _ = self.normaliser.normalise(graph=query_graph)
+            q_graph, _ = self.normaliser.normalise(graph=query_graph, create_new=True)
         else:
             q_graph = query_graph
 
-        # get the types of edges  to search for
+        # get the types of nodes to search for
         #
-        search_edge_types = {q_graph.edges[triple_key]['_type'] for triple_key in q_graph.edges}
+        search_node_types = {q_graph.nodes[node_key]['_type'] for node_key in q_graph.nodes}
 
         # calc the distance of the training graph to the existing neurons
         #
         distances = [(neuron_key,
-                      self.neural_gas.nodes[neuron_key]['generalised_graph'].compare_graph(graph_to_compare=q_graph,
-                                                                                           compare_edge_types=search_edge_types),
+                      self.neural_gas.nodes[neuron_key]['_value'].compare_graph(graph_to_compare=q_graph,
+                                                                                compare_node_types=search_node_types),
                       self.neural_gas.nodes[neuron_key]['n_bmu'],
-                      self.neural_gas.nodes[neuron_key]['generalised_graph'],
+                      self.neural_gas.nodes[neuron_key]['_value'],
                       self.neural_gas.nodes[neuron_key]['threshold'])
                      for neuron_key in self.neural_gas.nodes]
 
         # sort in ascending order of distance and descending order of number of times bmu
         #
-        distances.sort(key=lambda x: (x[1][0], -x[2]))
+        distances.sort(key=lambda x: (x[1]['graph']['actual'], -x[2]))
 
         # get closest neuron and all other 'activated neurons'
         #
-        activated_neurons = [distances[n_idx] for n_idx in range(len(distances)) if n_idx == 0 or distances[n_idx][1][0] <= distances[n_idx][4]]
+        activated_neurons = [distances[n_idx]
+                             for n_idx in range(len(distances))
+                             if n_idx == 0 or distances[n_idx][1]['graph']['actual'] <= distances[n_idx][4]]
 
         por = {'sogam': self.fabric_name,
                'domain': self.domain}
 
         if len(activated_neurons) > 0:
 
-            sum_distance = sum([n[1][0] for n in activated_neurons])
+            sum_distance = sum([n[1]['graph']['actual'] for n in activated_neurons])
 
             # select the bmu
             #
@@ -437,7 +453,7 @@ class AMGas(object):
                 por['graph'] = activated_neurons[0][3]
 
                 if sum_distance > 0 and len(activated_neurons) > 1:
-                    por['neurons'] = [{'neuron_key': n[0], 'weight': 1 - (n[1][0] / sum_distance)}
+                    por['neurons'] = [{'neuron_key': n[0], 'weight': 1 - (n[1]['graph']['actual'] / sum_distance)}
                                       for n in activated_neurons]
                 else:
                     por['neurons'] = [{'neuron_key': n[0], 'weight': 1.0} for n in activated_neurons]
@@ -445,10 +461,10 @@ class AMGas(object):
             # else create a weighted average of neurons
             #
             else:
-                por['graph'] = AMGraph()
+                por['graph'] = AMHGraph()
                 por['neurons'] = []
                 for n in activated_neurons:
-                    weight = 1 - (n[1][0] / sum_distance)
+                    weight = 1 - (n[1]['graph']['actual'] / sum_distance)
                     por['graph'].merge_graph(graph_to_merge=n[3], weight=weight)
                     por['neurons'].append({'neuron_key': n[0], 'weight': weight})
 
@@ -465,66 +481,92 @@ if __name__ == '__main__':
                anomaly_threshold_factor=4.0,
                fast_alpha=0.7,
                prune_threshold=0.01,
-               audit=False,
-               normalise=True
+               normaliser=True
                )
 
-    t1 = AMGraph(directional=True)
-    t1.set_edge(triple=(('TRADE', '*'), ('HAS_PLATFORM', None, None), ('PLATFORM', 'A')))
-    t1.set_edge(triple=(('TRADE', '*'), ('HAS_DATE', None, None), ('DATE', '22-11-66')))
-    t1.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=100)
+    t1 = AMHGraph(directional=True)
+    trade_key = t1.set_node(node_type='TRADE', value='*')
+    date_key = t1.set_node(node_type='DATE', value='22-11-66')
+    platform_key = t1.set_node(node_type='PLATFORM', value='A')
+    volume_key = t1.set_node(node_type='VOLUME', value=100)
 
-    edges_types = {t1.edges[triple_key]['_type'] for triple_key in t1.edges}
+    t1.set_edge(source_key=trade_key, target_key=platform_key, edge_type='HAS_PLATFORM')
+    t1.set_edge(source_key=trade_key, target_key=date_key, edge_type='HAS_DATE')
+    t1.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
+
+    node_types = {t1.nodes[node_key]['_type'] for node_key in t1.nodes}
 
     p1 = ng.train(training_graph=t1,
                   ref_id='t1',
-                  search_edge_types=edges_types,
-                  learn_edge_types=edges_types)
+                  search_node_types=node_types,
+                  learn_node_types=node_types)
 
-    t2 = AMGraph(directional=True)
-    t2.set_edge(triple=(('TRADE', '*'), ('HAS_PLATFORM', None, None), ('PLATFORM', 'B')))
-    t2.set_edge(triple=(('TRADE', '*'), ('HAS_DATE', None, None), ('DATE', '22-11-66')))
-    t2.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=50)
+    t2 = AMHGraph(directional=True)
+    trade_key = t2.set_node(node_type='TRADE', value='*')
+    date_key = t2.set_node(node_type='DATE', value='22-11-66')
+    platform_key = t2.set_node(node_type='PLATFORM', value='B')
+    volume_key = t2.set_node(node_type='VOLUME', value=50)
+
+    t2.set_edge(source_key=trade_key, target_key=platform_key, edge_type='HAS_PLATFORM')
+    t2.set_edge(source_key=trade_key, target_key=date_key, edge_type='HAS_DATE')
+    t2.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
 
     p2 = ng.train(training_graph=t2,
                   ref_id='t2',
-                  search_edge_types=edges_types,
-                  learn_edge_types=edges_types)
+                  search_node_types=node_types,
+                  learn_node_types=node_types)
 
-    t3 = AMGraph(directional=True)
-    t3.set_edge(triple=(('TRADE', '*'), ('HAS_PLATFORM', None, None), ('PLATFORM', 'A')))
-    t3.set_edge(triple=(('TRADE', '*'), ('HAS_DATE', None, None), ('DATE', '22-11-66')))
-    t3.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=75)
+    t3 = AMHGraph(directional=True)
+    trade_key = t3.set_node(node_type='TRADE', value='*')
+    date_key = t3.set_node(node_type='DATE', value='22-11-66')
+    platform_key = t3.set_node(node_type='PLATFORM', value='A')
+    volume_key = t3.set_node(node_type='VOLUME', value=75)
+
+    t3.set_edge(source_key=trade_key, target_key=platform_key, edge_type='HAS_PLATFORM')
+    t3.set_edge(source_key=trade_key, target_key=date_key, edge_type='HAS_DATE')
+    t3.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
 
     p3 = ng.train(training_graph=t3,
                   ref_id='t3',
-                  search_edge_types=edges_types,
-                  learn_edge_types=edges_types)
+                  search_node_types=node_types,
+                  learn_node_types=node_types)
 
-    t4 = AMGraph(directional=True)
-    t4.set_edge(triple=(('TRADE', '*'), ('HAS_PLATFORM', None, None), ('PLATFORM', 'B')))
-    t4.set_edge(triple=(('TRADE', '*'), ('HAS_DATE', None, None), ('DATE', '22-11-66')))
-    t4.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=60)
+    t4 = AMHGraph(directional=True)
+    trade_key = t4.set_node(node_type='TRADE', value='*')
+    date_key = t4.set_node(node_type='DATE', value='22-11-66')
+    platform_key = t4.set_node(node_type='PLATFORM', value='B')
+    volume_key = t4.set_node(node_type='VOLUME', value=60)
+
+    t4.set_edge(source_key=trade_key, target_key=platform_key, edge_type='HAS_PLATFORM')
+    t4.set_edge(source_key=trade_key, target_key=date_key, edge_type='HAS_DATE')
+    t4.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
 
     p4 = ng.train(training_graph=t4,
                   ref_id='t4',
-                  search_edge_types=edges_types,
-                  learn_edge_types=edges_types)
+                  search_node_types=node_types,
+                  learn_node_types=node_types)
 
-    t5 = AMGraph(directional=True)
-    t5.set_edge(triple=(('TRADE', '*'), ('HAS_PLATFORM', None, None), ('PLATFORM', 'A')))
-    t5.set_edge(triple=(('TRADE', '*'), ('HAS_DATE', None, None), ('DATE', '22-11-66')))
-    t5.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=110)
+    t5 = AMHGraph(directional=True)
+    trade_key = t5.set_node(node_type='TRADE', value='*')
+    date_key = t5.set_node(node_type='DATE', value='22-11-66')
+    platform_key = t5.set_node(node_type='PLATFORM', value='A')
+    volume_key = t5.set_node(node_type='VOLUME', value=110)
+
+    t5.set_edge(source_key=trade_key, target_key=platform_key, edge_type='HAS_PLATFORM')
+    t5.set_edge(source_key=trade_key, target_key=date_key, edge_type='HAS_DATE')
+    t5.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
 
     p5 = ng.train(training_graph=t5,
                   ref_id='t5',
-                  search_edge_types=edges_types,
-                  learn_edge_types=edges_types)
+                  search_node_types=node_types,
+                  learn_node_types=node_types)
 
     j_ng = ng.to_dict(denormalise=True)
 
-    t6 = AMGraph(directional=True)
-    t6.set_edge(triple=(('TRADE', '*'), ('HAS_VOLUME', None, None), ('VOLUME', 'TRADE')), numeric=90)
+    t6 = AMHGraph(directional=True)
+    trade_key = t6.set_node(node_type='TRADE', value='*')
+    volume_key = t6.set_node(node_type='VOLUME', value=90)
+    t6.set_edge(source_key=trade_key, target_key=volume_key, edge_type='HAS_VOLUME')
 
     q_por_bmu = ng.query(query_graph=t6, bmu_only=True)
     q_por_weav = ng.query(query_graph=t6, bmu_only=False)

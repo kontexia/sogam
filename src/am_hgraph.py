@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 
-from typing import Optional, Tuple,  Set
+from typing import Optional, Tuple,  Set, Dict
 from copy import deepcopy
 
 # alias types
@@ -37,6 +37,35 @@ Por = dict
 """ dictionary representing the path of reasoning """
 
 
+class Error(Exception):
+    """Base class for exceptions in this module."""
+    pass
+
+
+class NoNodeFoundError(Error):
+    """Exception raised when a Node is missing.
+
+    Attributes:
+        expression -- input expression in which the error occurred
+        message -- explanation of the error
+    """
+
+    def __init__(self, expression, message):
+        self.expression = expression
+        self.message = message
+
+class NoEdgeFoundError(Error):
+    """Exception raised when an Edge is missing.
+
+    Attributes:
+        expression -- input expression in which the error occurred
+        message -- explanation of the error
+    """
+
+    def __init__(self, expression, message):
+        self.expression = expression
+        self.message = message
+
 class AMHGraph(object):
 
     # class attributes
@@ -51,22 +80,23 @@ class AMHGraph(object):
     next_node_uid = 0
 
     @staticmethod
-    def get_node_key(node_type, node_uid) -> str:
+    def get_node_key(node_type, node_uid) -> NodeKey:
         # ':' special - enables easy splitting of keys to create ids
         #
         return f'{node_type}:{node_uid}'
 
     @staticmethod
-    def get_node_id(node_key: str) -> tuple:
+    def get_node_id(node_key: NodeKey) -> NodeId:
 
         # ':' special - enables easy splitting of keys to create ids
         #
-        node_id = tuple(node_key.split(':'))
+        split = node_key.split(':')
+        node_id = (split[0], split[1])
 
         return node_id
 
     @staticmethod
-    def get_edge_key(source_key, target_key, edge_type, directional: bool = False) -> str:
+    def get_edge_key(source_key, target_key, edge_type, directional: bool = False) -> EdgeKey:
 
         # if not directional then key will consist of alphanumeric sort of source_key and target_key
         # note ':' special - delimits all components and allows for easy splitting to derive equivalent id
@@ -78,28 +108,18 @@ class AMHGraph(object):
         return edge_key
 
     @staticmethod
-    def get_edge_id(edge_key: str) -> tuple:
+    def get_edge_id(edge_key: EdgeKey) -> EdgeId:
         # assume special ':' character delimits components
         #
-        edge_id = tuple(edge_key.split(':'))
-
+        split = edge_key.split(':')
+        edge_id = ((split[0], split[1]), split[2], (split[3], split[4]))
         return edge_id
 
-    def __init__(self, uid: Optional[str] = None, graph=None, directional=True, prune_threshold=0.01):
+    def __init__(self, uid: Optional[str] = None, graph=None, directional: bool = True, prune_threshold: float = 0.01):
 
-        if graph is not None:
-            if isinstance(graph, AMHGraph):
-                self.uid = graph.uid
-                self.prune_threshold = graph.prune_threshold
-                self.directional = graph.directional
-                self.edges = deepcopy(graph.edges)
-                self.nodes = deepcopy(graph.nodes)
-
-            # else assume dict
-            else:
-                self.from_dict(graph_dict=graph)
-
-        else:
+        # initialise from scratch
+        #
+        if graph is None:
             # every graph has a unique identifier
             #
             if uid is not None:
@@ -124,21 +144,49 @@ class AMHGraph(object):
             #
             self.directional = directional
 
-    def to_dict(self) -> dict:
-        graph_dict = {'_type': 'AMHGraph',
-                      '_uid': self.uid,
-                      '_prune_threshold': self.prune_threshold,
-                      '_directional': self.directional,
-                      '_nodes': deepcopy(self.nodes),
-                      '_edges': deepcopy(self.edges)}
+            # flag indicating if node numerics have been normalised
+            #
+            self.normalised = False
 
+        # else initialise from either another AMHGraph of a dict
+        #
+        else:
+            if isinstance(graph, AMHGraph):
+                self.uid = graph.uid
+                self.prune_threshold = graph.prune_threshold
+                self.directional = graph.directional
+                self.edges = deepcopy(graph.edges)
+                self.nodes = deepcopy(graph.nodes)
+                self.normalised = graph.normalised
+
+            # else assume dict
+            #
+            else:
+                self.from_dict(graph_dict=graph)
+
+    def to_dict(self, denormaliser=None) -> dict:
+
+        if denormaliser is None:
+            graph = self
+        else:
+            graph = denormaliser.denormalise(graph=self, create_new=True)
+
+        graph_dict = {'_type': 'AMHGraph',
+                      '_uid': graph.uid,
+                      '_prune_threshold': graph.prune_threshold,
+                      '_directional': graph.directional,
+                      '_normalised': graph.normalised,
+                      '_nodes': deepcopy(graph.nodes),
+                      '_edges': deepcopy(graph.edges)}
+
+        # check if any nodes can contain graphs
+        #
         for node_key in graph_dict['_nodes']:
             if isinstance(graph_dict['_nodes'][node_key]['_value'], AMHGraph):
-                graph_dict['nodes'][node_key]['_value'] = graph_dict['_nodes'][node_key]['_value'].to_dict()
-            elif isinstance(graph_dict['_nodes'][node_key]['_value'], AMNumeric):
-                graph_dict['nodes'][node_key]['_value'] = {'_type': AMNumeric,
-                                                           '_value': graph_dict['_nodes'][node_key]['_value'].value,
-                                                           '_normalised': graph_dict['_nodes'][node_key]['_value'].normalised}
+
+                # convert to dict
+                #
+                graph_dict['_nodes'][node_key]['_value'] = graph_dict['_nodes'][node_key]['_value'].to_dict()
 
         return graph_dict
 
@@ -146,19 +194,19 @@ class AMHGraph(object):
 
         self.uid = graph_dict['_uid']
         self.directional = graph_dict['_directional']
+        self.normalised = graph_dict['_normalised']
         self.prune_threshold = graph_dict['_prune_threshold']
         self.edges = deepcopy(graph_dict['_edges'])
         self.nodes = deepcopy(graph_dict['_nodes'])
 
-        # convert node values into either AMNumeric or AMHGraphs
+        # convert node values into AMHGraphs if required
         #
         for node_key in self.nodes:
-            if isinstance(self.nodes[node_key]['_value'], dict):
-                if self.nodes[node_key]['_value']['_type'] == 'AMNumeric':
-                    self.nodes[node_key]['_value'] = AMNumeric(value=self.nodes[node_key]['_value']['_value'])
-                    self.nodes[node_key]['_value'].normalised = self.nodes[node_key]['_value']['_normalised']
-                elif self.nodes[node_key]['_value']['_type'] == 'AMHGraph':
-                    self.nodes[node_key]['_value'] = AMHGraph(graph=self.nodes[node_key]['_value'])
+
+            # numerics and AMHGraphs represented as dicts so check
+            #
+            if isinstance(self.nodes[node_key]['_value'], dict) and self.nodes[node_key]['_value']['_type'] == 'AMHGraph':
+                self.nodes[node_key]['_value'] = AMHGraph(graph=self.nodes[node_key]['_value'])
 
     def set_node(self,
                  node_type: NodeType,
@@ -172,16 +220,25 @@ class AMHGraph(object):
             #
             if isinstance(value, str):
                 node_uid = value
-            else:
+            #else:
                 # auto generate uid
                 #
-                node_uid = f'{self.uid}:{AMHGraph.next_node_uid}'
-                AMHGraph.next_node_uid += 1
+                #node_uid = f'{self.uid}:{AMHGraph.next_node_uid}'
+                #AMHGraph.next_node_uid += 1
 
         node_key = AMHGraph.get_node_key(node_type=node_type, node_uid=node_uid)
 
+        # if numeric convert to dictionary
+        #
+        if isinstance(value, float) or isinstance(value, int):
+            value = {'_type': 'numeric', '_numeric': value}
+
+        # add new node if it doesn't exist
+        #
         if node_key not in self.nodes:
 
+            # default to 1.0 if not provided
+            #
             if prob is None:
                 prob = 1.0
 
@@ -191,11 +248,11 @@ class AMHGraph(object):
                                     '_value': value,
                                     '_prob': prob,
                                     '_community': None,
-                                    '_changed': False}
+                                    '_changed': True}
 
+        # else just update those attributes provided that are not None
+        #
         else:
-            # update the attributes that are set
-            #
             self.nodes[node_key]['_changed'] = True
             if value is not None:
                 self.nodes[node_key]['_value'] = value
@@ -203,6 +260,8 @@ class AMHGraph(object):
             if prob is not None:
                 self.nodes[node_key]['_prob'] = prob
 
+        # assume any other attribute provided needs updating
+        #
         if len(node_attributes) > 0:
             self.nodes[node_key].update(**node_attributes)
 
@@ -219,11 +278,11 @@ class AMHGraph(object):
         #
         if source_key in self.nodes and target_key in self.nodes:
 
-            # create the edge key
+            # will need the edge key
             #
             edge_key = AMHGraph.get_edge_key(source_key=source_key, target_key=target_key, edge_type=edge_type, directional=self.directional)
 
-            # if the edge already exists then just update the attributes
+            # if the edge already exists then just update the attributes that have changed
             #
             if edge_key in self.edges:
 
@@ -234,6 +293,9 @@ class AMHGraph(object):
 
                 if len(edge_attributes) > 0:
                     self.edges[edge_key].updated(**edge_attributes)
+
+            # add new edge
+            #
             else:
 
                 # if prob not set then default
@@ -245,19 +307,55 @@ class AMHGraph(object):
                                         '_source': source_key,
                                         '_target': target_key,
                                         '_prob': prob,
-                                        '_changed': False}
+                                        '_changed': True}
 
                 if len(edge_attributes) > 0:
                     self.edges[edge_key].update(**edge_attributes)
 
-                # add edge to nodes
+                # add edge to nodes - if not directional then both nodes get a link
                 #
                 self.nodes[source_key]['_edges'].add(edge_key)
                 if not self.directional:
                     self.nodes[target_key]['_edges'].add(edge_key)
+
+        # the nodes don't exist so throw exception
         else:
-            edge_key = None
+            raise NoNodeFoundError('AMHGraph.set_edge', f"tried to create edge to {source_key} and {target_key} that don't exist")
+
         return edge_key
+
+    def remove_node(self, node_key):
+
+        if node_key in self.nodes:
+            for edge_key in list(self.nodes[node_key]['_edges']):
+                self.remove_edge(edge_key)
+
+            # delete node
+            #
+            del self.nodes[node_key]
+        else:
+            raise NoNodeFoundError('AMHGraph.remove_node', f'{node_key} does not exist')
+
+    def remove_edge(self, edge_key):
+
+        if edge_key in self.edges:
+
+            # delete edge from nodes
+            #
+            source_key = self.edges[edge_key]['_source']
+            target_key = self.edges[edge_key]['_target']
+
+            if source_key in self.nodes and edge_key in self.nodes[source_key]['_edges']:
+                self.nodes[source_key]['_edges'].remove(edge_key)
+
+            if target_key in self.nodes and edge_key in self.nodes[target_key]['_edges']:
+                self.nodes[target_key]['_edges'].remove(edge_key)
+
+            # delete edge from edges
+            #
+            del self.edges[edge_key]
+        else:
+            raise NoEdgeFoundError('AMHGraph.remove_edge', f'{edge_key} does not exist')
 
     def compare_graph(self, graph_to_compare=None, compare_node_types: Optional[Set[NodeType]] = None) -> Por:
 
@@ -321,8 +419,8 @@ class AMHGraph(object):
 
                 # compare numerics
                 #
-                elif isinstance(self.nodes[node_key]['_value'], AMNumeric) and isinstance(graph_to_compare.nodes[node_key]['_value'], AMNumeric):
-                    node_dist += abs(self.nodes[node_key]['_value'].value - graph_to_compare.nodes[node_key]['_value'].value)
+                elif isinstance(self.nodes[node_key]['_value'], dict) and isinstance(graph_to_compare.nodes[node_key]['_value'], dict):
+                    node_dist += abs(self.nodes[node_key]['_value']['_numeric'] - graph_to_compare.nodes[node_key]['_value']['_numeric'])
 
                 # compare graphs
                 #
@@ -406,9 +504,9 @@ class AMHGraph(object):
 
         return por
 
-    def learn(self, graph_to_learn=None, learn_rate: float=1.0, learn_node_types: Optional[Set[NodeType]] = None, learn_values=True):
+    def learn(self, graph_to_learn=None, learn_rate: float = 1.0, learn_node_types: Optional[Set[NodeType]] = None, learn_values=True):
 
-        # if graph_to_compare is None then set to an empty graph
+        # if graph_to_learn is None then set to an empty graph
         #
         if graph_to_learn is None:
             graph_to_learn = AMHGraph()
@@ -456,8 +554,9 @@ class AMHGraph(object):
 
                         # if numeric move the numeric closed to graph_to_learn numeric
                         #
-                        if isinstance(self.nodes[node_key]['_value'], AMNumeric):
-                            self.nodes[node_key]['_value'].value += ((graph_to_learn.nodes[node_key]['_value'].value - self.nodes[node_key]['_value'].value) * learn_rate)
+                        if isinstance(self.nodes[node_key]['_value'], dict):
+                            self.nodes[node_key]['_value']['_numeric'] += ((graph_to_learn.nodes[node_key]['_value']['_numeric'] - self.nodes[node_key]['_value']['_numeric']) *
+                                                                           learn_rate)
 
                         # if a graph then learn the graph
                         #
@@ -491,8 +590,8 @@ class AMHGraph(object):
 
                         # if numeric then move value closer to zero
                         #
-                        if isinstance(self.nodes[node_key]['_value'], AMNumeric):
-                            self.nodes[node_key]['_value'].value -= (self.nodes[node_key]['_value'].value * learn_rate)
+                        if isinstance(self.nodes[node_key]['_value'], dict):
+                            self.nodes[node_key]['_value']['_numeric'] -= (self.nodes[node_key]['_value']['_numeric'] * learn_rate)
 
                         # if graph then learn an empty graph
                         #
@@ -530,10 +629,12 @@ class AMHGraph(object):
 
                     # if its a numeric then either copy or take reference
                     #
-                    elif isinstance(graph_to_learn.nodes[node_key]['_value'], AMNumeric):
+                    elif isinstance(graph_to_learn.nodes[node_key]['_value'], dict):
                         if learn_values:
-                            self.nodes[node_key]['_value'] = AMNumeric(value=graph_to_learn.nodes[node_key]['_value'].value * learn_rate)
+                            self.nodes[node_key]['_value']['_numeric'] = graph_to_learn.nodes[node_key]['_value']['_numeric'] * learn_rate
                         else:
+                            # just take reference
+                            #
                             self.nodes[node_key]['_value'] = graph_to_learn.nodes[node_key]['_value']
 
                     # if its a graph then either copy or take reference
@@ -544,31 +645,17 @@ class AMHGraph(object):
                             new_graph.learn(graph_to_learn=graph_to_learn, learn_rate=learn_rate, learn_node_types=learn_node_types, learn_values=learn_values)
                             self.nodes[node_key]['_value'] = new_graph
                         else:
+                            # just take reference
+                            #
                             self.nodes[node_key]['_value'] = graph_to_learn.nodes[node_key]['_value']
 
         # now prune nodes as required
         #
         for node_key in nodes_to_prune:
-            for edge_key in self.nodes[node_key]['edges']:
+            self.remove_node(node_key=node_key)
 
-                # get other node in connection
-                #
-                if self.edges[edge_key]['_source'] != node_key:
-                    target_key = self.edges[edge_key]['_source']
-                else:
-                    target_key = self.edges[edge_key]['_target']
-
-                # delete edge from other node
-                #
-                del self.nodes[target_key]['_edges'][edge_key]
-
-                # delete edge from edges
-                #
-                del self.edges[edge_key]
-
-            # delete node
-            #
-            del self.nodes[node_key]
+        # TODO
+        # do we need to worry about copying over the nodes that are not learnt?
 
         # work out the edges that will be learnt
         #
@@ -637,121 +724,215 @@ class AMHGraph(object):
                                   edge_type=graph_to_learn.edges[edge_key]['_type'],
                                   prob=edge_prob)
 
+        # TODO
+        # do we need to worry about copying over the edges that are not learnt?
+
         # delete edges as required
         #
         for edge_key in edges_to_prune:
+            self.remove_edge(edge_key=edge_key)
 
-            # delete edge from nodes
+    def merge_graph(self, graph_to_merge, weight=1.0):
+
+        for node_key in graph_to_merge.nodes.keys():
+
+            # if node in both graphs
             #
-            source_key = self.edges[edge_key]['_source']
-            target_key = self.edges[edge_key]['_target']
-            del self.nodes[source_key]['_edges'][edge_key]
-            del self.nodes[target_key]['_edges'][edge_key]
+            if node_key in self.nodes:
 
-            # delete edge from edges
-            #
-            del self.edges[edge_key]
+                self.nodes[node_key]['_prob'] += (graph_to_merge.nodes[node_key]['_prob'] * weight)
 
-
-class AMNumeric(object):
-    def __init__(self, value):
-        self.value = value
-        self.normalised = False
-
-
-class MinMaxNormaliser(object):
-    def __init__(self, type_groups: dict = None):
-
-        # map types to groups
-        #
-        self.types = {}
-
-        # map groups to min, max and AMNumeric
-        #
-        self.groups = {}
-
-        # if we are given a dictionary of type groups then apply
-        #
-        if type_groups is not None:
-            for atype in type_groups:
-                self.types[atype] = type_groups[atype]
-
-    def normalise(self, atype: str, numeric: AMNumeric) -> AMNumeric:
-
-        if not numeric.normalised:
-            if atype not in self.types:
-                # default set group is also the type
+                # if numeric then add
                 #
-                group = atype
-                self.types[atype] = group
-                self.groups[group] = {'min': numeric.value - 0.01, 'max': numeric.value,
-                                      'prev_min': numeric.value - 0.01, 'prev_max': numeric.value,
-                                      'AMNumeric': {numeric}}
+                if isinstance(self.nodes[node_key]['_value'], dict):
+                    self.nodes[node_key]['_value']['_numeric'] += (graph_to_merge.nodes[node_key]['_value']['_numeric'] * weight)
 
+                # if graph then merge
+                #
+                elif isinstance(self.nodes[node_key]['_value'], AMHGraph):
+                    self.nodes[node_key]['_value'].merge_graph(graph_to_merge=graph_to_merge.nodes[node_key]['_value']['_numeric'],
+                                                               weight=weight)
+
+            # node only in graph_to_learn
+            #
             else:
-                # get the group for the type
+
+                # if its a numeric
                 #
-                group = self.types[atype]
+                if isinstance(graph_to_merge.nodes[node_key]['_value'], dict):
+                    node_value = graph_to_merge.nodes[node_key]['_value']['_numeric'] * weight
 
-                if group not in self.groups:
-                    self.groups[atype] = {'min': numeric.value - 0.01, 'max': numeric.value,
-                                          'prev_min': numeric.value - 0.01, 'prev_max': numeric.value,
-                                          'AMNumeric': {numeric}}
+                # if it's a graph
+                #
+                elif isinstance(graph_to_merge.nodes[node_key]['_value'], AMHGraph):
+                    node_value = AMHGraph(uid=graph_to_merge.nodes[node_key]['_value'].uid)
+                    node_value.merge_graph(graph_to_merge=graph_to_merge.nodes[node_key]['_value'], weight=weight)
 
+                # else must be a string
+                #
                 else:
+                    node_value = graph_to_merge.nodes[node_key]['_value']
+                self.set_node(node_type=graph_to_merge.nodes[node_key]['_type'],
+                              node_uid=graph_to_merge.nodes[node_key]['_uid'],
+                              value=node_value,
+                              prob=graph_to_merge.nodes[node_key]['_prob'] * weight)
 
-                    # increase the max or decrease the min if required
-                    #
-                    renormalise = False
-                    if numeric.value > self.groups[group]['max']:
-                        self.groups[group]['prev_max'] = self.groups[group]['max']
-                        self.groups[group]['max'] = numeric.value
-                        renormalise = True
-                    elif numeric.value < self.groups[group]['min']:
-                        self.groups[group]['prev_min'] = self.groups[group]['min']
-                        self.groups[group]['min'] = numeric.value
-                        renormalise = True
+        for edge_key in graph_to_merge.edges.keys():
 
-                    if renormalise:
-                        for exist_numeric in self.groups[group]['AMNumeric']:
-                            dn_value = (exist_numeric.value * (self.groups[group]['prev_max'] - self.groups[group]['prev_min'])) + self.groups[group]['prev_min']
-                            exist_numeric.value = (dn_value - self.groups[group]['min']) / (self.groups[group]['max'] - self.groups[group]['min'])
+            # edge in this graph
+            #
+            if edge_key in self.edges:
 
-            self.groups[atype]['AMNumeric'].add(numeric)
-            numeric.value = (numeric.value - self.groups[group]['min']) / (self.groups[group]['max'] - self.groups[group]['min'])
-            numeric.normalised = True
+                self.edges[edge_key]['_prob'] += graph_to_merge.edges[edge_key]['_prob'] * weight
 
-        return numeric
+            # edge only in graph_to_learn
+            #
+            else:
+                self.set_edge(source_key=graph_to_merge.edges[edge_key]['_source'],
+                              target_key=graph_to_merge.edges[edge_key]['_target'],
+                              edge_type=graph_to_merge.edges[edge_key]['_type'],
+                              prob=graph_to_merge.edges[edge_key]['_prob'] * weight)
 
-    def denormalise(self, atype: str, numeric: AMNumeric) -> float:
 
-        value = numeric.value
-        if numeric.normalised:
-            if atype in self.types:
-                # get the group for the type
+class GraphNormaliser(object):
+    def __init__(self, normaliser=None):
+
+        if normaliser is None:
+            # map types to groups
+            #
+            self.types = {}
+
+            # map groups to min, max and graphs
+            #
+            self.groups = {}
+
+        elif isinstance(normaliser, dict):
+
+            self.types = normaliser['_types']
+            self.groups = normaliser['_groups']
+        elif isinstance(normaliser, GraphNormaliser):
+            self.types = deepcopy(normaliser.types)
+            self.groups = deepcopy(normaliser.groups)
+
+    def to_dict(self):
+        gn_dict = {'_types': deepcopy(self.types),
+                   '_groups': deepcopy(self.groups)}
+        return gn_dict
+
+    def normalise(self, graph: AMHGraph, create_new: bool = True) -> Tuple[AMHGraph, bool]:
+
+        if create_new:
+            # create a new graph that will hold the normalised values
+            #
+            n_graph = AMHGraph(graph=graph)
+        else:
+            n_graph = graph
+
+        renormalise = False
+
+        if not n_graph.normalised:
+            for node_key in n_graph.nodes:
+                if isinstance(n_graph.nodes[node_key]['_value'], dict):
+                    a_type = n_graph.nodes[node_key]['_type']
+                    if a_type not in self.types:
+
+                        # default set group is also the type
+                        #
+                        group = a_type
+                        self.types[a_type] = group
+                        self.groups[group] = {'min': n_graph.nodes[node_key]['_value']['_numeric'], 'max': n_graph.nodes[node_key]['_value']['_numeric'],
+                                              'prev_min': n_graph.nodes[node_key]['_value']['_numeric'], 'prev_max': n_graph.nodes[node_key]['_value']['_numeric']}
+
+                    else:
+                        # get the group for the type
+                        #
+                        group = self.types[a_type]
+
+                        if group not in self.groups:
+                            self.groups[a_type] = {'min': n_graph.nodes[node_key]['_value']['_numeric'], 'max': n_graph.nodes[node_key]['_value']['_numeric'],
+                                                   'prev_min': n_graph.nodes[node_key]['_value']['_numeric'], 'prev_max': n_graph.nodes[node_key]['_value']['_numeric']}
+
+                        else:
+
+                            # increase the max or decrease the min if required
+                            #
+                            if n_graph.nodes[node_key]['_value']['_numeric'] > self.groups[group]['max']:
+                                self.groups[group]['prev_max'] = self.groups[group]['max']
+                                self.groups[group]['max'] = n_graph.nodes[node_key]['_value']['_numeric']
+                                renormalise = True
+                            elif n_graph.nodes[node_key]['_value']['_numeric'] < self.groups[group]['min']:
+                                self.groups[group]['prev_min'] = self.groups[group]['min']
+                                self.groups[group]['min'] = n_graph.nodes[node_key]['_value']['_numeric']
+                                renormalise = True
+
+                    if self.groups[group]['max'] - self.groups[group]['min'] > 0.0:
+                        n_graph.nodes[node_key]['_value']['_numeric'] = ((n_graph.nodes[node_key]['_value']['_numeric'] - self.groups[group]['min']) /
+                                                                         (self.groups[group]['max'] - self.groups[group]['min']))
+                    else:
+                        n_graph.nodes[node_key]['_value']['_numeric'] = 1.0
+                    n_graph.normalised = True
+
+        return n_graph, renormalise
+
+    def denormalise(self, graph: AMHGraph, create_new: bool = True, prev_min_max=False) -> AMHGraph:
+
+        if graph.normalised:
+
+            if create_new:
+                # create a new graph that will hold the normalised values
                 #
-                group = self.types[atype]
+                dn_graph = AMHGraph(graph=graph)
+            else:
+                dn_graph = graph
 
-                value = (numeric.value * (self.groups[group]['max'] - self.groups[group]['min'])) + self.groups[group]['min']
+            for node_key in dn_graph.nodes:
+                if isinstance(dn_graph.nodes[node_key]['_value'], dict):
+                    a_type = dn_graph.nodes[node_key]['_type']
 
-        return value
+                    if a_type in self.types:
 
-    def remove_numeric(self, atype, numeric):
-        if atype in self.types:
-            group = self.types[atype]
-            if numeric in self.groups[group]['AMNumeric']:
-                del self.groups[group]['AMNumeric'][numeric]
+                        # get the group for the type
+                        #
+                        group = self.types[a_type]
+
+                        if prev_min_max:
+                            dn_graph.nodes[node_key]['_value']['_numeric'] = ((dn_graph.nodes[node_key]['_value']['_numeric'] * (self.groups[group]['prev_max'] - self.groups[group]['prev_min'])) +
+                                                                              self.groups[group]['prev_min'])
+                        else:
+                            dn_graph.nodes[node_key]['_value']['_numeric'] = ((dn_graph.nodes[node_key]['_value']['_numeric'] * (self.groups[group]['max'] - self.groups[group]['min'])) +
+                                                                              self.groups[group]['min'])
+                        dn_graph.normalised = False
+
+                # if node contains graph then denormalise it
+                #
+                elif isinstance(dn_graph.nodes[node_key]['_value'], AMHGraph):
+                    dn_graph.nodes[node_key]['_value'] = self.denormalise(graph=dn_graph.nodes[node_key]['_value'], create_new=False, prev_min_max=prev_min_max)
+        else:
+            dn_graph = graph
+        return dn_graph
+
+    def renormalise(self, graph: AMHGraph, create_new: bool = True) -> AMHGraph:
+        dn_graph = self.denormalise(graph=graph, create_new=create_new, prev_min_max=True)
+
+        n_graph, _ = self.normalise(graph=dn_graph, create_new=False)
+
+        return n_graph
 
 
 if __name__ == '__main__':
 
-    normaliser = MinMaxNormaliser()
+    normaliser = GraphNormaliser()
 
     g1 = AMHGraph()
-    a1 = g1.set_node(node_type='A', node_uid='1', value=normaliser.normalise(atype='A', numeric=AMNumeric(100)))
+    a1 = g1.set_node(node_type='A', node_uid='1', value=100)
+    g1, _ = normaliser.normalise(graph=g1, create_new=False)
 
     g2 = AMHGraph()
-    g2.set_node(node_type='A', node_uid='1', value=normaliser.normalise(atype='A', numeric=AMNumeric(101)))
+    g2.set_node(node_type='A', node_uid='1', value=101)
+    g2, renormalise = normaliser.normalise(graph=g2, create_new=False)
+
+    if renormalise:
+        g1 = normaliser.renormalise(graph=g1, create_new=False)
 
     por_1 = g1.compare_graph(graph_to_compare=g2)
 
@@ -775,7 +956,7 @@ if __name__ == '__main__':
 
     por_3 = g3.compare_graph(graph_to_compare=g4)
 
-    # add node and edges to compiste graphs
+    # add node and edges to composite graphs
     #
     e1 = g3.set_node(node_type='E', value='hello')
     g3.set_edge(source_key=ag, target_key=e1, edge_type='has_e')

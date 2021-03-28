@@ -6,7 +6,7 @@ from src.am_graph import get_triple_key
 import plotly.graph_objects as go
 
 
-def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
+def plot_gas(gas, raw_data, xyz_nodes, colour_nodes):
 
     node_x = []
     node_y = []
@@ -26,30 +26,40 @@ def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
     y_min_max = {'min': None, 'max': None}
     z_min_max = {'min': None, 'max': None}
 
-    xyz_triples = [get_triple_key(triple_id=triple_id, directional=True) for triple_id in xyz_triples]
+    xyz_node_keys = {'x': None, 'y': None, 'z': None}
+    for neuron_key in gas['neural_gas']['_nodes']:
+        for node_key in gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes']:
+            if ((xyz_node_keys['x'] is None and gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_type'] == xyz_nodes[0]) or
+                    node_key == xyz_node_keys['x']):
+                node_x.append(gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value']['_numeric'])
+                xyz_node_keys['x'] = node_key
+            elif ((xyz_node_keys['y'] is None and gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_type'] == xyz_nodes[1]) or
+                    node_key == xyz_node_keys['y']):
 
-    for neuron_key in gas['neural_gas']['nodes']:
-        node_x.append(gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges'][xyz_triples[0]]['_numeric'])
-        node_y.append(gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges'][xyz_triples[1]]['_numeric'])
-        if len(xyz_triples) == 3:
-            node_z.append(gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges'][xyz_triples[2]]['_numeric'])
-        else:
+                node_y.append(gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value']['_numeric'])
+                xyz_node_keys['y'] = node_key
+
+            elif (len(xyz_nodes) == 3 and
+                    ((xyz_node_keys['z'] is None and gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_type'] == xyz_nodes[2]) or
+                     node_key == xyz_node_keys['z'])):
+
+                node_z.append(gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value']['_numeric'])
+                xyz_node_keys['z'] = node_key
+
+            if colour_nodes is not None and gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_type'] == colour_nodes:
+                if gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value'] not in colour_labels:
+                    colour = next_color
+                    colour_labels[gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value']] = next_color
+                    next_color += 1
+                else:
+                    colour = colour_labels[gas['neural_gas']['_nodes'][neuron_key]['_value']['_nodes'][node_key]['_value']]
+                node_colour.append(colour)
+
+        if len(xyz_nodes) == 2:
             node_z.append(0.0)
 
-        if colour_edgeType is not None:
+        if colour_nodes is None:
 
-            colour_triple = [gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges'][triple_key]['_target']
-                             for triple_key in gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges']
-                             if gas['neural_gas']['nodes'][neuron_key]['generalised_graph']['edges'][triple_key]['_type'] == colour_edgeType]
-
-            if colour_triple[0] not in colour_labels:
-                colour = next_color
-                colour_labels[colour_triple[0]] = next_color
-                next_color += 1
-            else:
-                colour = colour_labels[colour_triple[0]]
-            node_colour.append(colour)
-        else:
             if x_min_max['max'] is None or node_x[-1] > x_min_max['max']:
                 x_min_max['max'] = node_x[-1]
             if x_min_max['min'] is None or node_x[-1] < x_min_max['min']:
@@ -64,9 +74,9 @@ def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
                 z_min_max['min'] = node_z[-1]
 
         node_label.append(neuron_key)
-        node_size.append(10 + gas['neural_gas']['nodes'][neuron_key]['n_bmu'])
+        node_size.append(10 + gas['neural_gas']['_nodes'][neuron_key]['n_bmu'])
 
-    if colour_edgeType is None:
+    if colour_nodes is None:
         for idx in range(len(node_x)):
             r = max(min(int(255 * ((node_x[idx] - x_min_max['min']) / (x_min_max['max'] - x_min_max['min']))), 255), 0)
             g = max(min(int(255 * ((node_y[idx] - y_min_max['min']) / (y_min_max['max'] - y_min_max['min']))), 255), 0)
@@ -74,19 +84,19 @@ def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
 
             node_colour.append(f'rgb({r},{g},{b})')
 
-    for triple_key in gas['neural_gas']['edges']:
+    for edge_key in gas['neural_gas']['_edges']:
 
-        edge_x.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_source']]['generalised_graph']['edges'][xyz_triples[0]]['_numeric'])
-        edge_x.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_target']]['generalised_graph']['edges'][xyz_triples[0]]['_numeric'])
+        edge_x.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_source']]['_value']['_nodes'][xyz_node_keys['x']]['_value']['_numeric'])
+        edge_x.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_target']]['_value']['_nodes'][xyz_node_keys['x']]['_value']['_numeric'])
         edge_x.append(None)
 
-        edge_y.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_source']]['generalised_graph']['edges'][xyz_triples[1]]['_numeric'])
-        edge_y.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_target']]['generalised_graph']['edges'][xyz_triples[1]]['_numeric'])
+        edge_y.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_source']]['_value']['_nodes'][xyz_node_keys['y']]['_value']['_numeric'])
+        edge_y.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_target']]['_value']['_nodes'][xyz_node_keys['y']]['_value']['_numeric'])
         edge_y.append(None)
 
-        if len(xyz_triples) == 3:
-            edge_z.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_source']]['generalised_graph']['edges'][xyz_triples[2]]['_numeric'])
-            edge_z.append(gas['neural_gas']['nodes'][gas['neural_gas']['edges'][triple_key]['_target']]['generalised_graph']['edges'][xyz_triples[2]]['_numeric'])
+        if len(xyz_nodes) == 3:
+            edge_z.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_source']]['_value']['_nodes'][xyz_node_keys['z']]['_value']['_numeric'])
+            edge_z.append(gas['neural_gas']['_nodes'][gas['neural_gas']['_edges'][edge_key]['_target']]['_value']['_nodes'][xyz_node_keys['z']]['_value']['_numeric'])
 
         else:
             edge_z.append(0.0)
@@ -116,7 +126,7 @@ def plot_gas(gas, raw_data, xyz_triples, colour_edgeType):
     fig = go.Figure(data=[raw_scatter, edge_scatter, neuron_scatter])
 
     fig.update_layout(width=1200, height=1200,
-                      title=dict(text=f'{gas["fabric_name"]} {gas["domain"]} Nos Neurons: {len(gas["neural_gas"]["nodes"])}'))
+                      title=dict(text=f'{gas["fabric_name"]} {gas["domain"]} Nos Neurons: {len(gas["neural_gas"]["_nodes"])}'))
     fig.show()
 
 
