@@ -3,6 +3,7 @@
 
 from src.sdr import SDR
 from typing import Optional, Set, Tuple
+from copy import deepcopy
 
 
 class SAM(object):
@@ -53,6 +54,31 @@ class SAM(object):
         self.last_bmu_key = neuron_key
 
         return neuron_key
+
+    def to_dict(self, decode: bool = False) -> dict:
+        d_sam = {'fabric_name': self.name,
+                 'fast_alpha': self.fast_alpha,
+                 'slow_alpha': self.slow_alpha,
+                 'prune_threshold': self.prune_threshold,
+                 'update_id': self.update_id,
+                 'next_neuron_id': self.next_neuron_id,
+                 'last_bmu_key': self.last_bmu_key,
+                 'ema_error': self.ema_error,
+                 'ema_variance': self.ema_variance,
+                 'anomaly_threshold_factor': self.anomaly_threshold_factor,
+                 'anomaly_threshold': self.anomaly_threshold,
+                 'anomalies': self.anomalies,
+                 'motif_threshold': self.motif_threshold,
+                 'motifs': self.motifs,
+                 'prune_neurons': self.prune_neurons,
+                 'neurons': deepcopy(self.neurons)
+                 }
+        # replace neuron sdrs with dict (decoded as required)
+        #
+        for neuron_key in d_sam['neurons']:
+            d_sam['neurons'][neuron_key]['sdr'] = d_sam['neurons'][neuron_key]['sdr'].to_dict(decode=decode)
+
+        return d_sam
 
     def update_gas_error(self, bmu_key: str, bmu_distance: float, ref_id: str) -> Tuple[bool, bool]:
 
@@ -389,6 +415,8 @@ if __name__ == '__main__':
     t_5.add_encoding(enc_type='Volume', value=110, encoder=numeric_enc)
 
     p5 = ng.train(sdr=t_5, ref_id='t_5', search_types={'Date', 'Platform', 'Volume'}, learn_types={'Date', 'Platform', 'Volume'})
+
+    ng_dict = ng.to_dict(decode=True)
 
     t_6 = SDR()
     t_6.add_encoding(enc_type='Volume', value=90, encoder=numeric_enc)

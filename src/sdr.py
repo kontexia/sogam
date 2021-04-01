@@ -1,13 +1,24 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
+from copy import deepcopy
 
 
 class SDR(object):
 
-    def __init__(self, enc_type=None, value=None, encoder=None):
+    def __init__(self, sdr=None, enc_type=None, value=None, encoder=None):
         self.encodings = {}
         self.encoder = {}
-        if enc_type is not None and value is not None and encoder is not None:
+
+        # copy an sdr if provided
+        # note don't copy encoder just take reference
+        #
+        if sdr is not None:
+            self.encodings = deepcopy(sdr.encodings)
+            for enc_type in sdr.encoder:
+                self.encoder[enc_type] = sdr.encoder[enc_type]
+        # else process a new value
+        #
+        elif enc_type is not None and value is not None and encoder is not None:
             self.add_encoding(enc_type=enc_type, value=value, encoder=encoder)
 
     def add_encoding(self, enc_type, value, encoder):
@@ -24,6 +35,14 @@ class SDR(object):
     def decode(self):
         dec = {enc_type: self.encoder[enc_type].decode(self.encodings[enc_type]) for enc_type in self.encodings}
         return dec
+
+    def to_dict(self, decode=False):
+        if decode:
+            d_sdr = {'encodings': self.decode()}
+            pass
+        else:
+            d_sdr = {'encodings': deepcopy(self.encodings)}
+        return d_sdr
 
     def overlap(self, sdr, search_types=None):
 

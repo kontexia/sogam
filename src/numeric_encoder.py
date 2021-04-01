@@ -24,6 +24,8 @@ class NumericEncoder(object):
         #
         round_numeric = int(numeric / self.min_step) * self.min_step
 
+        # if no existing encodings then create first one
+        #
         if len(self.encodings) == 0:
 
             bucket = 0
