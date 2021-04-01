@@ -14,11 +14,13 @@ class NumericEncoder(object):
         self.enc_size = enc_size
 
         self.min: int = 0
+        self.min_next_idx: int = 0
         self.max: int = 0
+        self.max_next_idx: int = 0
         self.zero_bucket = None
         random.seed(seed)
 
-    def encode(self, numeric):
+    def encode(self, numeric) -> set:
 
         # round the numeric to the minimum step
         #
@@ -34,21 +36,30 @@ class NumericEncoder(object):
             #
             self.zero_bucket = round_numeric
 
-            enc = set(random.sample(population=range(self.enc_size), k=self.n_bits))
-            self.encodings[bucket] = enc
+            # create a list of random numbers to represent the bits set
+            #
+            new_enc = list(random.sample(population=range(self.enc_size), k=self.n_bits))
+            self.encodings[bucket] = new_enc
 
-            # the max and min bucket
+            # the max bucket that exists along with the next offset in list of bits to change
             #
             self.max = bucket
-            self.min = bucket
+            self.max_next_idx = 0
 
-            # maintain the mapping of bits to bucket
+            # the min bucket that exists along with the next offset in list of bits to change
             #
-            for bit in enc:
+            self.min = bucket
+            self.min_next_idx = 0
+
+            # maintain the mapping of bits to bucket to allow for easy decoding
+            #
+            for bit in new_enc:
                 if bit not in self.bits:
                     self.bits[bit] = {bucket}
                 else:
                     self.bits[bit].add(bucket)
+
+            enc = set(self.encodings[bucket])
         else:
 
             # calculate the bucket associated with the encoding
@@ -58,25 +69,35 @@ class NumericEncoder(object):
             # just return encoding if bucket exists
             #
             if target_bucket in self.encodings:
-                enc = self.encodings[target_bucket]
+                enc = set(self.encodings[target_bucket])
 
             elif target_bucket > self.max:
+
                 # will need the bits from the current largest bucket encoding
                 #
                 prev_enc = self.encodings[self.max]
                 for bucket in range(self.max + 1, target_bucket + 1):
 
-                    # get another bit chosen at random
+                    # create the new encoding as a copy of the last max bucket
+                    #
+                    new_enc = [i for i in prev_enc]
+
+                    # get another bit chosen at random that's not in previous bucket encoding
                     #
                     new_bit = random.sample(population=[i for i in range(self.enc_size) if i not in prev_enc], k=1)
 
-                    # choose bit to replace
+                    # replace one bit at the max_next_idx slot which guarantees no clashes
                     #
-                    bit_to_replace = random.sample(population=prev_enc, k=1)
+                    new_enc[self.max_next_idx] = new_bit[0]
 
-                    # create the new encoding and save it
+                    # update the next idx to replace, remembering to wrap around if necessary
                     #
-                    new_enc = {i if i not in bit_to_replace else new_bit[0] for i in prev_enc}
+                    self.max_next_idx += 1
+                    if self.max_next_idx >= self.n_bits:
+                        self.max_next_idx = 0
+
+                    # save new encoding
+                    #
                     self.encodings[bucket] = new_enc
 
                     # maintain the mapping of bits to buckets
@@ -97,23 +118,32 @@ class NumericEncoder(object):
 
                 # the required encoding
                 #
-                enc = self.encodings[target_bucket]
+                enc = set(self.encodings[target_bucket])
 
             else:
                 prev_enc = self.encodings[self.min]
                 for bucket in range(self.min - 1, target_bucket - 1, -1):
 
-                    # get another bit chosen at random
+                    # create the new encoding as a copy of the last max bucket
+                    #
+                    new_enc = [i for i in prev_enc]
+
+                    # get another bit chosen at random that's not in previous bucket encoding
                     #
                     new_bit = random.sample(population=[i for i in range(self.enc_size) if i not in prev_enc], k=1)
 
-                    # choose bit to replace
+                    # replace one bit at the max_next_idx slot which guarantees no clashes
                     #
-                    bit_to_replace = random.sample(population=prev_enc, k=1)
+                    new_enc[self.min_next_idx] = new_bit[0]
 
-                    # the new encoding
+                    # update the next idx to replace, remembering to wrap around if necessary
                     #
-                    new_enc = {i if i not in bit_to_replace else new_bit[0] for i in prev_enc}
+                    self.min_next_idx += 1
+                    if self.min_next_idx >= self.n_bits:
+                        self.min_next_idx = 0
+
+                    # save new encoding
+                    #
                     self.encodings[bucket] = new_enc
 
                     # maintain the mapping of bits to buckets
@@ -134,7 +164,7 @@ class NumericEncoder(object):
 
                 # the encoding required
                 #
-                enc = self.encodings[target_bucket]
+                enc = set(self.encodings[target_bucket])
 
         return enc
 
@@ -186,6 +216,7 @@ if __name__ == '__main__':
 
     enc_1 = encoder.encode(100)
     enc_4 = encoder.encode(120.0)
+    enc_5 = encoder.encode(99)
 
     val_1 = encoder.decode(enc_1)
 
